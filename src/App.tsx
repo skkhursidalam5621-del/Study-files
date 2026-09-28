@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BookOpen } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
 import { MaterialCard } from './components/MaterialCard';
@@ -562,6 +563,9 @@ export default function App() {
           isSyncing={isSyncing}
         />
       )}
+
+      {/* Vercel Web Analytics */}
+      <Analytics />
     </div>
   );
 }
