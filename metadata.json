@@ -1,0 +1,6 @@
+{
+  "name": "AcademiaVault - Academic Study Hub",
+  "description": "Centralized, fast study material platform with subject-wise categorization, instant search, Google Drive storage & OAuth 2.0, Gemini study assistant, and AMOLED dark mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
