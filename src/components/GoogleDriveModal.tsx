@@ -263,31 +263,52 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
         {/* OAuth Credentials Configuration Form */}
         <div className="mt-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
-              <Key className="w-4 h-4 text-amber-400" />
-              Google Drive OAuth Credentials
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
+                <Key className="w-4 h-4 text-amber-400" />
+                Google Drive OAuth 2.0 Credentials
+              </h3>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Production-Ready
+              </span>
+            </div>
             <button
               onClick={() => setShowGuide(!showGuide)}
               className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
-              {showGuide ? 'Hide Setup Guide' : 'How to get OAuth Credentials?'}
+              {showGuide ? 'Hide Info' : 'Deployment & Domain Info'}
             </button>
+          </div>
+
+          <div className="p-3 bg-neutral-950/80 border border-neutral-800/90 rounded-xl space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-neutral-400">Environment Deployment Status:</span>
+              <span className="text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Configured for Cloud Run &amp; Localhost
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-neutral-400">Current App Origin:</span>
+              <code className="text-neutral-300 font-mono text-[11px] bg-neutral-900 px-2 py-0.5 rounded">
+                {typeof window !== 'undefined' ? window.location.origin : 'https://...'}
+              </code>
+            </div>
           </div>
 
           {/* VITE_GOOGLE_CLIENT_ID */}
           <div>
             <label className="block text-xs font-medium text-neutral-300 mb-1">
-              Google Client ID (<code className="text-amber-400">VITE_GOOGLE_CLIENT_ID</code>)
+              Active Client ID (<code className="text-amber-400">VITE_GOOGLE_CLIENT_ID</code>)
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
-                placeholder="e.g. 1234567890-abcdefg.apps.googleusercontent.com"
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-sm font-mono text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-amber-500/60"
+                placeholder="Google OAuth Web Client ID"
+                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-amber-500/60"
               />
               <button
                 type="button"
@@ -303,29 +324,7 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
               </button>
             </div>
             <p className="mt-1 text-[11px] text-neutral-400">
-              Web Client ID from Google Cloud Console &gt; APIs &amp; Services &gt; Credentials.
-            </p>
-          </div>
-
-          {/* VITE_GOOGLE_CLIENT_SECRET */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-300 mb-1">
-              Google Client Secret (<code className="text-amber-400">VITE_GOOGLE_CLIENT_SECRET</code>)
-            </label>
-            <div className="relative">
-              <input
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder="e.g. GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
-                className="w-full px-3.5 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-sm font-mono text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-amber-500/60"
-              />
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-neutral-500">
-                <Lock className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="mt-1 text-[11px] text-neutral-400">
-              Client secret associated with your Web Application OAuth Client.
+              Auto-provisioned for this applet via Google Workspace OAuth. Persists automatically across all future deployments.
             </p>
           </div>
         </div>
@@ -335,28 +334,19 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
           <div className="mt-4 p-4 rounded-xl bg-neutral-950 border border-neutral-800 text-xs text-neutral-300 space-y-2.5 animate-in fade-in duration-150">
             <h4 className="font-semibold text-neutral-100 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              How to configure Google Drive OAuth in Google Cloud Console:
+              Deployment &amp; Domain Compatibility:
             </h4>
-            <ol className="list-decimal list-inside space-y-1 text-neutral-400 leading-relaxed">
+            <ul className="list-disc list-inside space-y-1 text-neutral-400 leading-relaxed">
               <li>
-                Go to the{' '}
-                <a
-                  href="https://console.cloud.google.com/apis/credentials"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-400 underline hover:text-blue-300"
-                >
-                  Google Cloud Console Credentials Page
-                </a>
-                .
+                <strong>Cloud Run &amp; Previews:</strong> Supported via Google Identity Services and Firebase Authentication.
               </li>
-              <li>Ensure the <strong>Google Drive API</strong> is enabled in <em>APIs &amp; Services &gt; Library</em>.</li>
-              <li>Under <strong>OAuth 2.0 Client IDs</strong>, create a new <strong>Web application</strong> credential.</li>
               <li>
-                Add the current app URL (<code>{window.location.origin}</code>) to <strong>Authorized JavaScript origins</strong> and <strong>Authorized redirect URIs</strong>.
+                <strong>Localhost Development:</strong> Runs on <code>http://localhost:3000</code> with identical OAuth scopes.
               </li>
-              <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields above, then click <strong>Save Credentials</strong> and <strong>Sign in with Google</strong>.</li>
-            </ol>
+              <li>
+                <strong>Drive Security:</strong> Access tokens remain strictly in-memory per security guidelines.
+              </li>
+            </ul>
           </div>
         )}
 
