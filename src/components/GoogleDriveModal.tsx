@@ -43,6 +43,9 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
 
   const [clientId, setClientId] = useState(currentConfig.clientId || '');
   const [clientSecret, setClientSecret] = useState(currentConfig.clientSecret || '');
+  const [manualToken, setManualToken] = useState(currentConfig.manualAccessToken || '');
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -70,9 +73,10 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
   const handleSignIn = async () => {
     setIsSigningIn(true);
     setTestResult(null);
+    setUnauthorizedDomain(null);
     try {
       const res = await googleSignIn();
-      if (res?.user) {
+      if (res?.user && res.accessToken) {
         // Probe drive
         const testRes = await testGoogleDriveConnection(res.accessToken);
         setTestResult(testRes);
@@ -80,12 +84,46 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
       }
     } catch (err: any) {
       console.error('Sign-in error:', err);
+      if (
+        err?.code === 'auth/unauthorized-domain' ||
+        err?.message?.includes('authorized domain') ||
+        err?.message?.includes('unauthorized-domain')
+      ) {
+        setUnauthorizedDomain(typeof window !== 'undefined' ? window.location.hostname : 'current domain');
+      }
       setTestResult({
         success: false,
         message: err?.message || 'Failed to authenticate with Google Drive.',
       });
     } finally {
       setIsSigningIn(false);
+    }
+  };
+
+  const handleConnectWithToken = async () => {
+    if (!manualToken.trim()) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const token = manualToken.trim();
+      const res = await testGoogleDriveConnection(token);
+      setTestResult(res);
+      if (res.success) {
+        saveGoogleDriveConfig(clientId, clientSecret, {
+          manualAccessToken: token,
+          isConnected: true,
+          userEmail: res.details?.userEmail,
+          userName: res.details?.userName,
+        });
+        onConfigUpdated();
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err?.message || 'Failed to connect using provided access token.',
+      });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -110,7 +148,9 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
   };
 
   const handleSaveCredentials = () => {
-    saveGoogleDriveConfig(clientId, clientSecret);
+    saveGoogleDriveConfig(clientId, clientSecret, {
+      manualAccessToken: manualToken.trim() || undefined,
+    });
     setSavedNotification(true);
     setTimeout(() => setSavedNotification(false), 2500);
     onConfigUpdated();
@@ -338,17 +378,89 @@ export const GoogleDriveModal: React.FC<GoogleDriveModalProps> = ({
             </h4>
             <ul className="list-disc list-inside space-y-1 text-neutral-400 leading-relaxed">
               <li>
-                <strong>Cloud Run &amp; Previews:</strong> Supported via Google Identity Services and Firebase Authentication.
+                <strong>Cloud Run &amp; Previews:</strong> Uses official Firebase Authentication handler at <code className="text-amber-300">gen-lang-client-0370980506.firebaseapp.com</code>.
               </li>
               <li>
                 <strong>Localhost Development:</strong> Runs on <code>http://localhost:3000</code> with identical OAuth scopes.
               </li>
               <li>
-                <strong>Drive Security:</strong> Access tokens remain strictly in-memory per security guidelines.
+                <strong>Instant Token Backup:</strong> Direct OAuth access tokens can be connected below as an instant alternative.
               </li>
             </ul>
           </div>
         )}
+
+        {/* Unauthorized Domain Alert & One-Click Guide */}
+        {unauthorizedDomain && (
+          <div className="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-3 animate-in fade-in duration-150">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <h4 className="font-semibold text-amber-300 text-sm">Domain Authorization Required</h4>
+                <p className="text-neutral-300 leading-relaxed">
+                  To allow Google sign-in on this Cloud Run deployment, add your current domain to <strong>Authorized domains</strong> in Firebase Console:
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <code className="px-2.5 py-1 bg-black/60 border border-amber-500/30 rounded font-mono text-neutral-100 select-all text-xs">
+                    {unauthorizedDomain}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(unauthorizedDomain);
+                      setCopiedDomain(true);
+                      setTimeout(() => setCopiedDomain(false), 2000);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded border border-amber-500/30 transition-colors flex items-center gap-1"
+                  >
+                    {copiedDomain ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copiedDomain ? 'Copied' : 'Copy Domain'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="pt-1 flex flex-wrap items-center gap-2 text-[11px]">
+              <a
+                href="https://console.firebase.google.com/project/gen-lang-client-0370980506/authentication/settings"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 font-semibold text-neutral-900 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors shadow-sm"
+              >
+                <span>Add Domain in Firebase Console</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <span className="text-neutral-400">(Authentication &gt; Settings &gt; Authorized domains &gt; Add domain)</span>
+            </div>
+          </div>
+        )}
+
+        {/* Direct Google Access Token (Instant Connection Backup) */}
+        <div className="mt-5 p-4 rounded-xl bg-neutral-950/70 border border-neutral-800 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-semibold text-neutral-200">
+              Manual Google Access Token (Instant Backup Connection)
+            </label>
+            <span className="text-[10px] text-neutral-500 font-mono">OAuth 2.0 Bearer</span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={manualToken}
+              onChange={(e) => setManualToken(e.target.value)}
+              placeholder="Paste ya29.a0... OAuth Bearer token to connect instantly"
+              className="flex-1 px-3.5 py-2 bg-neutral-900 border border-neutral-800 rounded-xl text-xs font-mono text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-amber-500/60"
+            />
+            <button
+              onClick={handleConnectWithToken}
+              disabled={!manualToken.trim() || testing}
+              className="px-3.5 py-2 text-xs font-semibold text-neutral-900 bg-amber-400 hover:bg-amber-300 disabled:opacity-40 rounded-xl transition-colors whitespace-nowrap shadow-sm"
+            >
+              Connect Token
+            </button>
+          </div>
+          <p className="text-[11px] text-neutral-400 leading-relaxed">
+            Optionally connect directly from CLI (<code className="text-amber-300 font-mono">gcloud auth print-access-token</code>) or Google OAuth Playground without waiting for GCP domain propagation.
+          </p>
+        </div>
 
         {/* Live Test / Diagnostic Results */}
         {testResult && (

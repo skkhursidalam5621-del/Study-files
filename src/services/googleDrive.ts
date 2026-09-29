@@ -2,6 +2,8 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   signOut,
@@ -41,77 +43,29 @@ provider.setCustomParameters({
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
 
-declare global {
-  interface Window {
-    google?: any;
-  }
-}
-
 /**
- * Direct Google Identity Services (GIS) Token Client fallback.
- * Ensures OAuth token acquisition functions reliably on all deployment domains
- * (Cloud Run, staging, preview, and localhost).
+ * Checks for a redirect sign-in result when returning from redirect flow.
  */
-const signInWithGisTokenClient = (): Promise<{
-  accessToken: string;
-  user: { email?: string; displayName?: string; photoURL?: string };
-}> => {
-  return new Promise((resolve, reject) => {
-    if (!window.google?.accounts?.oauth2) {
-      return reject(
-        new Error(
-          'Google Identity Services client is initializing. Please click "Sign in with Google" again in a moment.'
-        )
-      );
+export const checkRedirectAuth = async (): Promise<{ user: User; accessToken: string } | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        saveGoogleDriveConfig(CLIENT_ID, undefined, {
+          userEmail: result.user.email || undefined,
+          userName: result.user.displayName || undefined,
+          userPhoto: result.user.photoURL || undefined,
+          isConnected: true,
+        });
+        return { user: result.user, accessToken: cachedAccessToken };
+      }
     }
-
-    try {
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES.join(' '),
-        callback: async (resp: any) => {
-          if (resp.error) {
-            return reject(
-              new Error(
-                resp.error_description || resp.error || 'Google Drive authentication was not completed.'
-              )
-            );
-          }
-          if (!resp.access_token) {
-            return reject(new Error('No access token returned from Google authorization.'));
-          }
-
-          let userProfile = {
-            email: undefined as string | undefined,
-            displayName: undefined as string | undefined,
-            photoURL: undefined as string | undefined,
-          };
-
-          try {
-            const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${resp.access_token}` },
-            });
-            if (userRes.ok) {
-              const data = await userRes.json();
-              userProfile = {
-                email: data.email,
-                displayName: data.name,
-                photoURL: data.picture,
-              };
-            }
-          } catch {
-            // Profile fetch optional
-          }
-
-          resolve({ accessToken: resp.access_token, user: userProfile });
-        },
-      });
-
-      tokenClient.requestAccessToken({ prompt: 'select_account' });
-    } catch (err: any) {
-      reject(err);
-    }
-  });
+  } catch (err: any) {
+    console.warn('Redirect auth check notice:', err);
+  }
+  return null;
 };
 
 /**
@@ -121,67 +75,88 @@ export const initAuth = (
   onAuthSuccess?: (user: User | any, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  // Check for redirect result first
+  checkRedirectAuth().then((redirectRes) => {
+    if (redirectRes && onAuthSuccess) {
+      onAuthSuccess(redirectRes.user, redirectRes.accessToken);
+    }
+  });
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      const token = await getAccessToken();
+      if (token) {
+        if (onAuthSuccess) onAuthSuccess(user, token);
       } else {
         if (onAuthFailure) onAuthFailure();
       }
     } else {
-      if (onAuthFailure) onAuthFailure();
+      const cfg = getStoredGoogleDriveConfig();
+      if (cfg.manualAccessToken) {
+        if (onAuthSuccess) {
+          onAuthSuccess(
+            { email: cfg.userEmail || 'Drive User', displayName: cfg.userName || 'Drive Connected' } as any,
+            cfg.manualAccessToken
+          );
+        }
+      } else {
+        if (onAuthFailure) onAuthFailure();
+      }
     }
   });
 };
 
 /**
- * Initiates the Google OAuth sign-in flow with Google Drive permissions.
- * Supports primary Firebase Auth popup with seamless Google Identity Services (GIS)
- * fallback for robust operation across Cloud Run and localhost environments.
+ * Initiates the Google OAuth sign-in flow with Google Drive permissions using Firebase Auth.
+ * If popups are blocked by mobile browsers, seamlessly falls back to redirect.
  */
 export const googleSignIn = async (): Promise<{ user: User | any; accessToken: string } | null> => {
   try {
     isSigningIn = true;
 
-    // Attempt 1: Standard Firebase Auth Popup
+    let result;
     try {
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential?.accessToken) {
-        cachedAccessToken = credential.accessToken;
-
-        saveGoogleDriveConfig(CLIENT_ID, undefined, {
-          userEmail: result.user.email || undefined,
-          userName: result.user.displayName || undefined,
-          userPhoto: result.user.photoURL || undefined,
-          isConnected: true,
-        });
-
-        return { user: result.user, accessToken: cachedAccessToken };
-      }
+      result = await signInWithPopup(auth, provider);
     } catch (popupErr: any) {
-      console.warn(
-        'Firebase popup attempt note:',
-        popupErr?.code || popupErr?.message || popupErr
-      );
-
-      // If domain not authorized yet in Firebase Auth or popup blocked, seamlessly use Google Identity Services
-      const gisResult = await signInWithGisTokenClient();
-      cachedAccessToken = gisResult.accessToken;
-
-      saveGoogleDriveConfig(CLIENT_ID, undefined, {
-        userEmail: gisResult.user.email,
-        userName: gisResult.user.displayName,
-        userPhoto: gisResult.user.photoURL,
-        isConnected: true,
-      });
-
-      return { user: gisResult.user, accessToken: cachedAccessToken };
+      // If mobile browser blocks popup or cancels popup request, fall back to redirect
+      if (
+        popupErr?.code === 'auth/popup-blocked' ||
+        popupErr?.code === 'auth/cancelled-popup-request'
+      ) {
+        console.info('Mobile browser blocked popup; switching to signInWithRedirect...');
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
+      throw popupErr;
     }
 
-    throw new Error('Failed to retrieve access token from Google sign-in.');
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error('Failed to retrieve access token from Google sign-in.');
+    }
+
+    cachedAccessToken = credential.accessToken;
+
+    saveGoogleDriveConfig(CLIENT_ID, undefined, {
+      userEmail: result.user.email || undefined,
+      userName: result.user.displayName || undefined,
+      userPhoto: result.user.photoURL || undefined,
+      isConnected: true,
+    });
+
+    return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google Drive sign-in error:', error);
+    if (error?.code === 'auth/unauthorized-domain') {
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+      const customErr = new Error(
+        `Domain authorization required: The domain "${hostname}" must be added to Authorized Domains in Firebase Authentication Console (Project: ${firebaseConfig.projectId}).`
+      );
+      (customErr as any).code = 'auth/unauthorized-domain';
+      (customErr as any).hostname = hostname;
+      (customErr as any).projectId = firebaseConfig.projectId;
+      throw customErr;
+    }
     throw error;
   } finally {
     isSigningIn = false;
@@ -189,10 +164,13 @@ export const googleSignIn = async (): Promise<{ user: User | any; accessToken: s
 };
 
 /**
- * Returns the currently cached access token.
+ * Returns the currently cached access token or stored manual access token.
  */
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  if (cachedAccessToken) return cachedAccessToken;
+  const cfg = getStoredGoogleDriveConfig();
+  if (cfg.manualAccessToken) return cfg.manualAccessToken;
+  return null;
 };
 
 /**
@@ -225,6 +203,7 @@ export const logout = async () => {
       userEmail: undefined,
       userName: undefined,
       userPhoto: undefined,
+      manualAccessToken: undefined,
     });
   }
 };
@@ -240,6 +219,7 @@ export function getStoredGoogleDriveConfig(): GoogleDriveConfig {
   let userName: string | undefined;
   let userPhoto: string | undefined;
   let folderId: string | undefined;
+  let manualAccessToken: string | undefined;
   let lastTestedAt: string | undefined;
   let lastSyncedAt: string | undefined;
 
@@ -252,6 +232,7 @@ export function getStoredGoogleDriveConfig(): GoogleDriveConfig {
       userName = parsed.userName;
       userPhoto = parsed.userPhoto;
       folderId = parsed.folderId;
+      manualAccessToken = parsed.manualAccessToken;
       lastTestedAt = parsed.lastTestedAt;
       lastSyncedAt = parsed.lastSyncedAt;
     }
@@ -263,14 +244,17 @@ export function getStoredGoogleDriveConfig(): GoogleDriveConfig {
     userEmail = auth.currentUser.email || userEmail;
     userName = auth.currentUser.displayName || userName;
     userPhoto = auth.currentUser.photoURL || userPhoto;
-    if (cachedAccessToken) {
+    if (cachedAccessToken || manualAccessToken) {
       isConnected = true;
     }
+  } else if (manualAccessToken) {
+    isConnected = true;
   }
 
   return {
     clientId: CLIENT_ID,
     clientSecret: envClientSecret,
+    manualAccessToken,
     isConnected,
     userEmail,
     userName,

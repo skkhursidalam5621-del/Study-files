@@ -80,6 +80,7 @@ export interface StudyMaterial {
 export interface GoogleDriveConfig {
   clientId: string;
   clientSecret?: string;
+  manualAccessToken?: string;
   isConnected: boolean;
   userEmail?: string;
   userName?: string;
